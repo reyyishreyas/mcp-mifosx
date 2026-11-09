@@ -1,6 +1,6 @@
 # Mifos MCP Server — Python Implementation
 
-The **Mifos MCP Server** is a standalone, stateless integration tier that bridges any AI assistant or agent framework to the **Apache Fineract** banking backend. It registers **76 typed tools** via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), making it compatible with any MCP-compliant client. Registering a tool is not the same as exposing it: which tools an agent may see and call is decided by the [tool profile](#tool-profiles-enforced-by-the-server) (`MCP_AGENT_PROFILE` — see [Tool profiles](#tool-profiles-enforced-by-the-server)).
+The **Mifos MCP Server** is a standalone, stateless integration tier that bridges any AI assistant or agent framework to the **Apache Fineract** banking backend. It registers **77 typed tools** via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), making it compatible with any MCP-compliant client. Registering a tool is not the same as exposing it: which tools an agent may see and call is decided by the [tool profile](#tool-profiles-enforced-by-the-server) (`MCP_AGENT_PROFILE` — see [Tool profiles](#tool-profiles-enforced-by-the-server)).
 
 ---
 
@@ -15,7 +15,7 @@ This is the **Server**, not a client or agent. It does one thing well: translate
                        │ REST API
 ┌──────────────────────▼──────────────────────┐
 │         mcp_server.py  (This Repo)           │
-│    Stateless MCP Server — 76 typed tools     │
+│    Stateless MCP Server — 77 typed tools     │
 └──────────────────────┬──────────────────────┘
                        │ MCP Standard Protocol (stdio / SSE)
          ┌─────────────┼──────────────┐
@@ -140,7 +140,7 @@ This server is **framework-agnostic**. Any application that speaks the MCP proto
 
 ---
 
-## Available Tools (76)
+## Available Tools (77)
 
 All tools are registered in `mcp_server.py` with `@mcp.tool()` and are discoverable by any MCP client.
 
@@ -165,12 +165,13 @@ All tools are registered in `mcp_server.py` with `@mcp.tool()` and are discovera
 | `create_lending_group`    | Create a lending group                          |
 | `get_group`               | Show group details and members                  |
 
-### 📸 Document capture & verification (3 tools)
+### 📸 Document capture & verification (4 tools)
 
 | Tool                      | Description                                     |
 | ------------------------- | ----------------------------------------------- |
 | `validate_capture_quality` | Deterministic capture-quality gate on a document photo BEFORE upload: verdict `RETAKE` (unreadable — capture again) / `REVIEW` (borderline — human judge) / `PASS` (usable), with reasons and measured signals (sharpness, contrast, ink_ratio, brightness). Offline, no LLM, no CV/ML library — pure NumPy |
 | `upload_client_document`   | Gate-then-upload a photo as a client document. An unreadable (RETAKE) capture is refused with its reasons unless `force=True`; REVIEW verdicts upload but stay flagged in the `capture_gate` audit object |
+| `run_document_intake`      | Critical end-to-end intake workflow: gate -> upload -> verify. Runs the deterministic capture gate on the assessed bytes, uploads the gated bytes (retries refused unless `force=True`), and — when OCR-extracted fields are supplied — chains the deterministic detail verification; returns `resourceId`, `upload_rejected`, `capture_gate` audit trail and the `verification` roll-up |
 | `verify_client_details`    | Verify document details against the client's records: the vision model in the AI client extracts fields (fullName / nationalId / mobileNo) from the photo; this tool fetches the client profile + identity-document identifiers from Fineract and compares each field deterministically — per-field `MATCH` / `REVIEW` / `MISMATCH` / `NO_SOURCE_DATA` (names token-order-free and punctuation-folded; IDs exact; phones tolerate country codes), overall `VERIFIED` / `NEEDS_REVIEW` / `FAILED`. No LLM in the comparison |
 
 ### 👥 Groups & Centers (6 tools)
@@ -315,15 +316,15 @@ Once the browser opens:
 
 > ⚠️ Do **not** try to connect to a separately running `mcp_server.py`. The Inspector **spawns** the server itself via stdio.
 
-### Step 3 — Browse All 76 Tools
+### Step 3 — Browse All 77 Tools
 
-After connecting, click the **"Tools"** tab in the left sidebar. You will see all 76 tools listed with their names, descriptions, and input schemas — or, when the server is running its default profile, the tools that profile exposes. You can:
+After connecting, click the **"Tools"** tab in the left sidebar. You will see all 77 tools listed with their names, descriptions, and input schemas — or, when the server is running its default profile, the tools that profile exposes. You can:
 
 - **Click any tool** to expand its input form
 - **Fill in parameters** and click **"Call Tool"** to invoke it live against Fineract
 - **Inspect the raw JSON response** returned by the tool
 
-> ℹ️ The Inspector lists only the tools of the **active profile**. The default is the `read-only` profile; to browse and call all 76, launch the server with `MCP_AGENT_PROFILE=all` (see [Tool profiles](#tool-profiles-enforced-by-the-server)).
+> ℹ️ The Inspector lists only the tools of the **active profile**. The default is the `read-only` profile; to browse and call all 77, launch the server with `MCP_AGENT_PROFILE=all` (see [Tool profiles](#tool-profiles-enforced-by-the-server)).
 
 ### Programmatic Tests
 
@@ -337,7 +338,7 @@ pytest tests/ -v
 Expected output:
 
 ```
-  ✅ PASS — All 76 tools registered with unique names
+  ✅ PASS — All 77 tools registered with unique names
   ✅ list_offices          : OK
   ✅ list_staff            : OK
   ✅ search_clients (Bruce): OK

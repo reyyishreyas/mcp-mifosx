@@ -3,6 +3,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+"""Mifos X MCP server: FastMCP tool boundary for the Apache Fineract backend.
+
+Exposes the banking domain tools as Model Context Protocol tools. Every tool
+wrapper goes through ``safe_tool`` to normalise failures (validation errors,
+bare JSON arrays, error sentinels) into the MCP contract; domain logic lives
+in ``tools/`` and HTTP in the Fineract adapter.
+"""
+
 import logging
 from typing import Optional
 
@@ -48,6 +56,9 @@ from tools.domains.clients import (
 from tools.domains.codetables import get_code_values as get_code_values_domain
 from tools.domains.codetables import list_codes as list_codes_domain
 from tools.domains.codetables import list_datatables as list_datatables_domain
+from tools.domains.documents import (
+    run_document_intake as run_document_intake_domain,
+)
 from tools.domains.documents import (
     upload_client_document as upload_client_document_domain,
 )
@@ -236,8 +247,10 @@ def safe_tool(tool_name: str, list_key: str = "items") -> Callable:
         FastMCP still derives the correct input and output schema.
     """
     def decorator(func: Callable) -> Callable:
+        """Wrap a domain tool function into the validated MCP-callable form."""
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            """Bind + validate inputs, run the tool, normalise the result."""
             try:
                 # Bind args + kwargs so validate_input sees defaults too
                 bound = signature(func).bind_partial(*args, **kwargs)
@@ -512,6 +525,32 @@ def verify_client_details(clientId: int, fullName: str = None, nationalId: str =
     if not isinstance(check, dict) or "error" in check:
         return _prefetch_failure(check, f"Client ID {clientId} not found.")
     return verify_client_details_domain.func(clientId, fullName, nationalId, mobileNo)
+
+@mcp.tool()
+@safe_tool("run_document_intake")
+def run_document_intake(
+    clientId: int,
+    imagePath: str,
+    name: str = None,
+    description: str = None,
+    force: bool = False,
+    fullName: str = None,
+    nationalId: str = None,
+    mobileNo: str = None,
+) -> dict:
+    """Run the full document intake: deterministic capture gate -> upload -> verify.
+    Critical agentic KYC/loan/savings intake workflow. The capture-quality gate runs
+    first on the assessed bytes (RETAKE refused unless force=True; REVIEW flagged);
+    the gated bytes are uploaded as the client document; when OCR-extracted fields are
+    supplied, the deterministic detail verification runs in the same workflow.
+    Response carries resourceId, upload_rejected, capture_gate audit trail and the
+    deterministic verification roll-up. No LLM participates in the gate or the comparison."""
+    check = get_client_details.func(clientId)
+    if not isinstance(check, dict) or "error" in check:
+        return _prefetch_failure(check, f"Client ID {clientId} not found.")
+    return run_document_intake_domain.func(
+        clientId, imagePath, name, description, force, fullName, nationalId, mobileNo
+    )
 
 @mcp.tool()
 @safe_tool("list_client_charges")

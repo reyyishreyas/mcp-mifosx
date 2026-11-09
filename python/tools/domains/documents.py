@@ -164,6 +164,83 @@ def upload_client_document(
 
 
 @tool
+def run_document_intake(
+    clientId: int,
+    imagePath: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    force: bool = False,
+    fullName: Optional[str] = None,
+    nationalId: Optional[str] = None,
+    mobileNo: Optional[str] = None,
+) -> dict:
+    """Run the full document intake: gate -> upload -> verify, as one critical workflow.
+
+    Answers: "take this client document photo all the way through intake".
+    Composes the deterministic capture gate with the gate-then-upload flow
+    (assessing + uploading the exact same bytes, no TOCTOU) and chains the
+    deterministic detail verification when the caller supplies OCR-extracted
+    fields. One agent-facing critical path for KYC / loan / savings intake.
+
+    Args:
+        clientId: the Mifos X client the document belongs to.
+        imagePath: capture file inside the configured capture directory.
+        name / description: optional Fineract document metadata.
+        force: override a gate RETAKE refusal (officer-approved retake).
+        fullName / nationalId / mobileNo: optional OCR-extracted fields
+            (fullName / nationalId / mobileNo) to run the deterministic
+            verification against the client record in the same workflow.
+
+    Returns:
+        resourceId: Fineract document resource id when the upload succeeded.
+        upload_rejected: True when the gate refused (RETAKE) and nothing uploaded.
+        capture_gate: audit trail — verdict (RETAKE|REVIEW|PASS), reasons, signals.
+        verification: present only when an extracted field was supplied; the
+            deterministic verification roll-up.
+        error / status_code: Fineract failure shape when the upload failed.
+    """
+    gate, image_bytes = _assess_capture(imagePath)
+    if "error" in gate:
+        # unreadable / missing / out-of-root capture: never reaches the upload
+        return gate
+    verdict = gate.get("verdict")
+    if verdict is None:
+        # fail closed: a gate response lacking a verdict never uploads
+        return {"error": f"capture gate could not assess {imagePath}"}
+    if verdict == _GATE_BLOCKED and not force:
+        # the gate refused: the response carries the verdict and the gates
+        # that tripped, so the officer retakes instead of the agent
+        # retrying the same bad upload forever
+        return {"upload_rejected": True, **gate}
+
+    file_name = os.path.basename(imagePath)
+    form = {k: v for k, v in {"name": name, "description": description}.items() if v}
+    if not form:
+        form = {"name": file_name}
+    # Upload the exact bytes the gate assessed — never re-open the mutable
+    # imagePath, so the bytes Fineract receives are the bytes that were gated.
+    result = fineract_client.execute_multipart(
+        f"clients/{clientId}/documents", form, image_bytes, file_name
+    )
+    capture_gate = {k: gate[k] for k in ("verdict", "reasons", "signals") if k in gate}
+    if "error" in result:
+        result["capture_gate"] = capture_gate
+        return result
+    # the capture made it to Fineract: carry the gate verdict + signals in
+    # the audit trail so any upload past the gate stays traceable
+    result["capture_gate"] = capture_gate
+    # optional deterministic content verification on the agent-extracted fields
+    if any(str(v or "").strip() for v in (fullName, nationalId, mobileNo)):
+        result["verification"] = verify_client_details.func(
+            clientId,
+            fullName=fullName,
+            nationalId=nationalId,
+            mobileNo=mobileNo,
+        )
+    return result
+
+
+@tool
 def verify_client_details(
     clientId: int,
     fullName: Optional[str] = None,

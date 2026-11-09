@@ -36,6 +36,7 @@ from tools.domains.clients import (
 )
 from tools.domains.codetables import get_code_values, list_codes, list_datatables
 from tools.domains.documents import (
+    run_document_intake,
     upload_client_document,
     validate_capture_quality,
     verify_client_details,
@@ -97,7 +98,8 @@ class DomainRegistry:
                 create_group, get_group_details, get_client_identifiers,
                 create_client_identifier, get_client_documents, get_client_charges,
                 apply_client_charge, get_client_transactions, get_client_addresses,
-                validate_capture_quality, upload_client_document, verify_client_details
+                validate_capture_quality, upload_client_document, verify_client_details,
+                run_document_intake
             ],
             "groups": [
                 list_groups, activate_group, add_group_member,

@@ -13,6 +13,7 @@ tested with a stubbed Fineract adapter — no network.
 """
 
 import io
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image, ImageDraw
@@ -262,6 +263,71 @@ def test_upload_propagates_server_error(tmp_path, monkeypatch):
     p.write_bytes(_png_bytes(_crisp_text_page()))
     r = doc_domain.upload_client_document.func(42, str(p))
     assert r["error"] == "409 Conflict"
+
+
+def test_run_document_intake_refuses_retake_without_force(tmp_path, monkeypatch):
+    """The composed intake workflow refuses a RETAKE capture before uploading."""
+    Image = cg._pillow()
+    monkeypatch.setenv("MIFOSX_CAPTURE_DIR", str(tmp_path))
+    p = tmp_path / "blank.png"
+    p.write_bytes(_png_bytes(Image.new("L", (512, 384), 244)))
+    calls = {}
+
+    def fake_multipart(endpoint, form, file, filename=None):
+        """Stub the adapter: the intake workflow refuses the retake without uploading."""
+        calls["endpoint"] = endpoint
+        return {"resourceId": 42}
+
+    monkeypatch.setattr(doc_domain.fineract_client, "execute_multipart", fake_multipart)
+    r = doc_domain.run_document_intake.func(42, str(p))
+    assert r["upload_rejected"] is True
+    assert r["verdict"] == "RETAKE" and r["reasons"]
+    assert calls == {}  # nothing uploaded
+
+
+def test_run_document_intake_passes_then_uploads_with_audit(tmp_path, monkeypatch):
+    """Gate-PASS intake uploads the assessed bytes and carries the gate audit trail."""
+    monkeypatch.setenv("MIFOSX_CAPTURE_DIR", str(tmp_path))
+    p = tmp_path / "good.png"
+    p.write_bytes(_png_bytes(_crisp_text_page()))
+
+    def fake_multipart(endpoint, form, file, filename=None):
+        """Stub the adapter to return a successful upload response."""
+        return {"resourceId": 99}
+
+    monkeypatch.setattr(doc_domain.fineract_client, "execute_multipart", fake_multipart)
+    r = doc_domain.run_document_intake.func(42, str(p), name="kyc-id")
+    assert r["resourceId"] == 99
+    assert r["capture_gate"]["verdict"] == "PASS"
+    assert r["capture_gate"]["reasons"] == []
+    assert "upload_rejected" not in r  # success: nothing refused the upload
+
+
+def test_run_document_intake_verifies_when_extracted_supplied(tmp_path, monkeypatch):
+    """With extracted fields the composed workflow chains the deterministic verification."""
+    monkeypatch.setenv("MIFOSX_CAPTURE_DIR", str(tmp_path))
+    p = tmp_path / "good.png"
+    p.write_bytes(_png_bytes(_crisp_text_page()))
+
+    def fake_multipart(endpoint, form, file, filename=None):
+        """Stub the adapter for the composed intake workflow's upload step."""
+        return {"resourceId": 99}
+
+    monkeypatch.setattr(doc_domain.fineract_client, "execute_multipart", fake_multipart)
+    captured = {}
+
+    def fake_verify(clientId, fullName=None, nationalId=None, mobileNo=None):
+        """Stub the deterministic verification and capture its inputs."""
+        captured["clientId"] = clientId
+        captured["fullName"] = fullName
+        captured["nationalId"] = nationalId
+        captured["mobileNo"] = mobileNo
+        return {"verified": True, "overall": "VERIFIED"}
+
+    monkeypatch.setattr(doc_domain, "verify_client_details", SimpleNamespace(func=fake_verify))
+    r = doc_domain.run_document_intake.func(42, str(p), fullName="Reyyappa Reddy", nationalId="AB-1234-5678")
+    assert r["verification"]["overall"] == "VERIFIED"
+    assert captured["clientId"] == 42 and captured["fullName"] == "Reyyappa Reddy"
 
 
 # ── registry intent routing ─────────────────────────────────────────
